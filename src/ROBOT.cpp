@@ -13,29 +13,35 @@ ROBOT::ROBOT(YETI_YUKON &rYukon) : Yukon(rYukon),
     Lift(*this),
     Claw(*this),
     Balance(*this),
-                                   Auton(*this),
+    Auton(*this)
     
-        Btd(&Usb), PSx(&Btd) //, PAIR)
+        
     
 
 {
 }
 
+//Init Pins, motor, and PS4
 void ROBOT::Setup()
 {
-    Usb.Init();
     DriveLeft.Init();
     DriveRight.Init();
     LiftMotor.Init();
     ClawMotor.Init();
     BalanceMotor.Init();
+    PS4.begin("20:20:20:20:20:20"); 
+    Serial.println("PS4 Ready");
 
     pinMode(_Button0, INPUT_PULLUP);
     pinMode(_LEDBuiltIn, OUTPUT);
+    pinMode(EnablePin, INPUT_PULLUP);
+    digitalWrite(_LEDBuiltIn, LOW);
 }
 
+//Wifi, gyro, sensor read
 void ROBOT::GeneralTask()
-{
+{   
+    //Wifi and Gyro Setup
     if (digitalRead(_Button0) == LOW)
     {
         delay(1000);
@@ -56,39 +62,15 @@ void ROBOT::GeneralTask()
             Yukon.ToggleWIFI();
         }
     }
-    //Read The Light Sensor
-    LightSensorVal = Yukon.ADC.readADC(_AutonLightSensor);
 
-    //Keep track of the max light sensor value since power on.
-    if (LightSensorVal > MaxLightSensorVal)
-        MaxLightSensorVal = LightSensorVal;
+    //Read The Enable Pin
+    State.AutonLightSensorActive = EnableVal;
+    State.AutonLightSensorActive = digitalRead(EnablePin);
 
-    // Make sure the light sensor pin hasn't been detecting light since the robot turned on.
-    // This is a sign that the light sensor may be disconnected, or is not shielded enough.
-    // Or that the threshold is set too close to zero.
-    if (MaxLightSensorVal > _AutonLightSensorThreshold)
-    {
-        bool tempActive = (LightSensorVal <= _AutonLightSensorThreshold);
 
-        if (State.AutonLightSensorActive != tempActive)
-        {
-            //Change in light sensor
-            if (State.AutonLightSensorState > 0)
-                State.AutonLightSensorState++;
-
-            switch (State.AutonLightSensorState)
-            {
-            case 4:
-                Yukon.Disable();
-            case 5:
-                Yukon.Enable();
-            }
-
-            State.AutonLightSensorActive = tempActive;
-        }
-    }
 }
 
+//Writes to motor contollers. No need to change
 void ROBOT::WriteRobot()
 {
     if (Yukon.IsDisabled())
@@ -110,55 +92,69 @@ void ROBOT::WriteRobot()
     }
 }
 
+//Read contoller and Gyro
 void ROBOT::USBOIGYRO()
 {
-     //Read The Controller
-    Usb.Task();
-        
-            if (PSx.connected())
-            {
-        Drive.OISetSpeed(Yukon.JoystickTo255(PSx.getAnalogHat(LeftHatY), 10),Yukon.JoystickTo255(PSx.getAnalogHat(RightHatY), 10));
-        Lift.OISetSpeed(PSx.getAnalogButton(R2) - PSx.getAnalogButton(L2));
-        Claw.OISetSpeed((PSx.getButtonPress(R1)*255) - (PSx.getButtonPress(L1)*255));
-        Balance.OISetSpeed(Yukon.JoystickTo255(PSx.getAnalogHat(LeftHatY), 10));
-    
-        if (PSx.getButtonClick(LEFT))
-        Auton.QueuePrev();
-        if (PSx.getButtonClick(RIGHT))
-        Auton.QueueNext();
-        if (PSx.getButtonClick(DOWN))
-        Auton.ToggleArmed();
+        DriveLeftSpeed = (PS4.data.analog.stick.ly)*2;
+        DriveRightSpeed = (PS4.data.analog.stick.ry)*2;
+        BalanceSpeed = (PS4.data.analog.stick.rx)*2;
 
+        if(DriveRightSpeed < -255) DriveRightSpeed = -255;
+        if(DriveLeftSpeed < -255) DriveLeftSpeed = -255;
 
-        if (PSx.getButtonClick(X))
+        if(abs(DriveLeftSpeed) < 11)
         {
-            if (Auton.IsRunning())
-            {
-                Yukon.Disable();
-            }
-            else
-            {
-                Auton.LaunchQueued();
-            }
+            DriveLeftSpeed = 0;
         }
 
-        if (PSx.getButtonClick(SQUARE))
-        Auton.ToggleLockArmed();
-
-        if (PSx.getButtonClick(PS))
-        PSx.disconnect();
+        if(abs(DriveRightSpeed) < 11)
+        {
+            DriveRightSpeed = 0;
         }
-    
 
+        if(PrecisionMode)
+        {
+            DriveLeftSpeed = PS4.data.analog.stick.ly;
+            DriveRightSpeed = PS4.data.analog.stick.ry;
+        }
+           
+        LiftSpeed = (PS4.data.analog.button.r2)-(PS4.data.analog.button.l2);
+        ClawSpeed = (PS4.data.button.l1-PS4.data.button.r1)*255;
+        Drive.OISetSpeed(DriveLeftSpeed,DriveRightSpeed);
+        Lift.OISetSpeed(LiftSpeed);
+        Claw.OISetSpeed(ClawSpeed);
+        Balance.OISetSpeed(BalanceSpeed);
 
+        if(_NextModeMillis < millis())
+        {
+            if(PS4.data.button.circle == 1) 
+            {
+                PrecisionMode = !PrecisionMode;
+            }
+            if (PS4.data.button.left == 1) Auton.QueuePrev();
+
+            if (PS4.data.button.right == 1) Auton.QueueNext();
+
+            if (PS4.data.button.down == 1) Auton.ToggleArmed();
+
+            if(PS4.data.button.up == 1)
+            {
+                EnableVal = true;
+            }
+            _NextModeMillis = millis() + 150;
+        }
     Yukon.GYRO.Loop();
 }
+
 int ScreenToShow = 0;
 unsigned long SecondsPerScreen = 5000;
 unsigned long NextScreen = SecondsPerScreen;
 
+//Print to the ESP32 display and PS4 Led
 void ROBOT::OLEDLoop()
-{
+{   
+    
+    
     if (Auton.IsArmLocked())
     {
         Yukon.OLED.clear();
@@ -251,5 +247,16 @@ void ROBOT::OLEDLoop()
                 NextScreen = millis() + SecondsPerScreen;
             }
         }
+
+        if(PrecisionMode)
+        {
+            PS4.setLed(0,255,0);
+        }
+
+        if(!PrecisionMode)
+        {
+            PS4.setLed(0,0,255);
+        }
+        PS4.sendToController();
     }
 }

@@ -3,19 +3,16 @@
 
 #include <YETI_YUKON.h>
 #include <STATE.h>
-
-#include <PS4BT.h>
-#include <usbhub.h>
-
 #include <YUKON_CytronMD10.h>
 #include <Encoder.h>
-
-
+#include <PS4Controller.h>
+#include <esp_bt_main.h>
+#include <esp_bt_device.h>
+#include <SPI.h>
 #include "Subsystems\Drive.h"
 #include "Subsystems\Lift.h"
 #include "Subsystems\Claw.h"
 #include "Subsystems\Balance.h"
-
 #include "Autonomous\AUTONOMOUS.h"
 
 class ROBOT
@@ -54,10 +51,7 @@ class ROBOT
     AUTONOMOUS Auton;
 
     //USB Items
-    USB Usb;
-    
-    BTD Btd;
-	PS4BT PSx;
+
     
     
    
@@ -93,7 +87,16 @@ class ROBOT
         
     static const int _LiftEncoderPin1 = 999;
     static const int _LiftEncoderPin2 = 999;
-        
+
+    static const int EnablePin = 32;
+    bool PrecisionMode = false;
+    int16_t DriveRightSpeed = 0;
+    int16_t DriveLeftSpeed = 0;
+    int16_t LiftSpeed = 0;
+    int16_t ClawSpeed = 0;
+    int16_t BalanceSpeed = 0;
+    long _NextModeMillis = 0;
+    bool EnableVal = false;
 
     static const uint8_t _Button0 = 0;
     static const uint8_t _LEDBuiltIn = 25;
